@@ -10,7 +10,10 @@
 //*********************************************************
 
 #include "../DXSample/stdafx.h"
-#include "D3D12nBodyGravity.h"
+#include "D3D12llm.h"
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx12.h"
 
 // InterlockedCompareExchange returns the object's value if the 
 // comparison fails.  If it is already 0, then its value won't 
@@ -58,6 +61,7 @@ void D3D12nBodyGravity::OnInit()
     LoadPipeline();
     LoadAssets();
     CreateAsyncContexts();
+    InitImGui();
 }
 
 // Load the rendering pipeline dependencies.
@@ -180,6 +184,14 @@ void D3D12nBodyGravity::LoadPipeline()
             ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
         }
     }
+
+    // Create ImGui SRV descriptor heap
+    D3D12_DESCRIPTOR_HEAP_DESC imGuiSrvHeapDesc = {};
+    imGuiSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    imGuiSrvHeapDesc.NumDescriptors = 1;
+    imGuiSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(m_device->CreateDescriptorHeap(&imGuiSrvHeapDesc, IID_PPV_ARGS(&m_imGuiSrvDescHeap)));
+
 }
 
 // Load the sample assets.
@@ -642,7 +654,6 @@ void D3D12nBodyGravity::OnRender()
 
         // Record all the commands we need to render the scene into the command list.
         PopulateCommandList();
-
         // Execute the command list.
         ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
         m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
@@ -744,30 +755,12 @@ void D3D12nBodyGravity::PopulateCommandList()
     // Render the particles.
     float viewportHeight = static_cast<float>(static_cast<UINT>(m_viewport.Height) / m_heightInstances);
     float viewportWidth = static_cast<float>(static_cast<UINT>(m_viewport.Width) / m_widthInstances);
-    for (UINT n = 0; n < ThreadCount; n++)
-    {
-        const UINT srvIndex = n + (m_srvIndex[n] == 0 ? SrvParticlePosVelo0 : SrvParticlePosVelo1);
-
-        CD3DX12_VIEWPORT viewport(
-            (n % m_widthInstances) * viewportWidth,
-            (n / m_widthInstances) * viewportHeight,
-            viewportWidth,
-            viewportHeight);
-
-        m_commandList->RSSetViewports(1, &viewport);
-
-        CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(m_srvUavHeap->GetGPUDescriptorHandleForHeapStart(), srvIndex, m_srvUavDescriptorSize);
-        m_commandList->SetGraphicsRootDescriptorTable(GraphicsRootSRVTable, srvHandle);
-
-        m_commandList->DrawInstanced(ParticleCount, 1, 0, 0);
-    }
-
+	RenderImGui();
     m_commandList->RSSetViewports(1, &m_viewport);
 
     // Indicate that the back buffer will now be used to present.
     m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
-    ThrowIfFailed(m_commandList->Close());
+	ThrowIfFailed(m_commandList->Close());
 }
 
 DWORD D3D12nBodyGravity::AsyncComputeThreadProc(int threadIndex)
@@ -918,4 +911,49 @@ void D3D12nBodyGravity::MoveToNextFrame()
         ThrowIfFailed(m_renderContextFence->SetEventOnCompletion(m_frameFenceValues[m_frameIndex], m_renderContextFenceEvent));
         WaitForSingleObject(m_renderContextFenceEvent, INFINITE);
     }
+}
+
+void D3D12nBodyGravity::InitImGui()
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplWin32_Init(Win32Application::GetHwnd());
+    ImGui_ImplDX12_Init(m_device.Get(), FrameCount,
+        DXGI_FORMAT_R8G8B8A8_UNORM, m_imGuiSrvDescHeap.Get(),
+        m_imGuiSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
+        m_imGuiSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
+}
+
+void D3D12nBodyGravity::RenderImGui()
+{
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    {
+        static float f = 0.0f;
+        static int counter = 0;
+
+        ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+
+        ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
+
+
+        ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+
+        if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+            counter++;
+        ImGui::SameLine();
+        ImGui::Text("counter = %d", counter);
+
+        ImGui::End();
+    }
+
+    ImGui::Render();
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+
 }

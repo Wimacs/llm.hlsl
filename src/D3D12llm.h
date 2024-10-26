@@ -93,6 +93,9 @@ private:
     UINT m_rtvDescriptorSize;
     UINT m_srvUavDescriptorSize;
 
+    ComPtr<ID3D12DescriptorHeap> m_imGuiSrvDescHeap;
+    bool m_showImGuiDemo = true;
+
     // Asset objects.
     ComPtr<ID3D12PipelineState> m_pipelineState;
     ComPtr<ID3D12PipelineState> m_computeState;
@@ -179,6 +182,8 @@ private:
     void LoadParticles(_Out_writes_(numParticles) Particle* pParticles, const XMFLOAT3 &center, const XMFLOAT4 &velocity, float spread, UINT numParticles);
     void CreateParticleBuffers();
     void PopulateCommandList();
+    void InitImGui();
+    void RenderImGui();
 
     static DWORD WINAPI ThreadProc(ThreadData* pData)
     {
